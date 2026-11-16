@@ -1,0 +1,11 @@
+(
+	name: "Swirl",
+	summary: "chorus, ensemble, dimension, flanger, thru-zero, barber pole and vibrato in one engine of moving delay lines, as a UGen and as an object, with a window",
+	version: "0.1.0",
+	author: "Francesco Corvi",
+	url: "https://github.com/fracnesco/sc-swirl.git",
+	license: "MIT",
+	copyright: "Copyright (c) 2026 Francesco Corvi",
+	schelp: "HelpSource",
+	dependencies: ["https://github.com/fracnesco/sc-fx-kit.git"]
+)
