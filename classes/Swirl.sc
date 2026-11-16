@@ -229,6 +229,15 @@ Swirl : FxParamUnit {
 		^if (s[\style] == \thruzero) { this.d0Of(s[\baseTime]) } { 0 }
 	}
 
+	// FxUnit's latency: this unit's, as it is set now - and a change of what
+	// decides it (the style, the delay) says changed(\latency)
+	latency { ^Swirl.latency(this.settings) }
+
+	prChanged { |what|
+		super.prChanged(what);
+		if (#[\style, \baseTime, \settings].includes(what)) { this.changed(\latency) };
+	}
+
 	// the lfo's slope factor: a shape at f Hz moves k f a second at most
 	*slopeOf { |shape| ^[4, 2pi, 6, 2pi][this.shapes.indexOf(shape.asSymbol) ? 0] }
 
