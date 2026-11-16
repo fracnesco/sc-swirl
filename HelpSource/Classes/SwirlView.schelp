@@ -1,0 +1,122 @@
+TITLE:: SwirlView
+summary:: Swirl's display: the voices, and the comb they make
+categories:: Libraries>Swirl
+related:: Classes/Swirl, Classes/FxParamView, Classes/FxDevicePanel
+
+DESCRIPTION::
+What link::Classes/FxDevicePanel:: puts at the top of link::Classes/Swirl::'s window, with the meters beside it. Two parts, each with a title and a caption.
+
+Left, strong::the voices:: (60 % of the width): every delay line as it moves over one lfo period, its delay along (ms, on a log scale from 0.05 to 45) and the pitch it sings at up (cents). A read pointer whose delay grows sings flat, one whose delay shrinks sings sharp, so each line draws a closed path: the Juno's triangle two flat lines at plus and minus its cents joined by vertical jumps (two steady detunes), a sine an ellipse, the ensemble three loops a side (with the fast lfo's ripple on them), the barber pole lines that fade in and out with their window, vibrato an ellipse at the left edge. The left side's lines are solid, the right side's dashed and fainter; lines after the first are dimmer. The noise shape is drawn, dashed, as the sine it wanders like, and the caption marks its cents with ≈. The blue line is the dry - at its delay in thru-zero, labelled with how late, since the dry is late too there; vibrato has none. The faint band is the range the lines sweep. The dots are where each line is now, as big as it is loud in the mix, and the ring round each side's first dot is that side's wet level. The vertical scale is ±10, 25, 50 or 100 cents, whichever holds the largest swing.
+
+Under the voices, strong::the lfo strip::: the lfo over one period (the barber pole's saw, the fast lfo's ripple when there is one) and a playhead where it is now.
+
+Right, strong::the comb:: (40 %): the box's response for the left side at the lines' delays now, 20 Hz to 20 kHz along, -24 to +18 dB up; a faint band where it travels over 16 phases of the lfo; the output's spectrum behind. A comb has more teeth than the display has pixels, so each pixel column draws its lowest to highest point, never one sample that may fall between two teeth. The first notch - or the first peak, with feedback in the flanger - is marked and named with its note, refined between the curve's points: code::notch 123 Hz · B2 -4 ct::. Vibrato has no dry, so nothing to comb with: the curve is flat and nothing is named.
+
+The caption over the voices is link::Classes/Swirl#*caption::: code::chorus · 2.8 ± 2.1 ms · ±7.3 ct · 0.50 Hz::.
+
+strong::What is a model and what is measured.:: The paths, the bands, the sweep range, the comb's curve and its band, the caption and the lfo curve are worked out from the settings, with link::Classes/Swirl::'s class-side model (the same formulas as the sound). The dots, the playhead, the rings and the spectrum are what the server reports in the object's code::extras::, and move only while the window runs and the effect is on. Until a reply comes the dots sit where the model puts them a quarter of the way round, so the display is never blank. A synced lfo's cents and paths are worked out at link::#*cps:: (Tidal's default tempo), since the object does not know the clock; the dots and the playhead are the server's.
+
+table::
+## strong::in the display:: || strong::does::
+## drag the voices || along: code::baseTime:: (log); up and down: code::sweep::, or code::cents:: in vibrato
+## the wheel on the voices || code::lfoPhase::
+## double click the voices || delay and depth back to their defaults
+## drag the comb || along: code::baseTime::, so the first notch follows the pointer; up and down: code::feedback::, in chorus, flanger and barber pole only
+## the wheel on the comb || the depth (code::sweep:: or code::cents::)
+## double click the comb || code::feedback:: 0
+## drag the lfo strip || along: code::lfoRate:: (log), when free
+## the wheel on the lfo strip || the next shape (not in the barber pole)
+## double click the lfo strip || code::lfoRate:: back to its default
+## shift || fine, a tenth as far, everywhere
+::
+
+A parameter the mode ignores never moves, and the hint at the bottom of the window says why (code::feedback: chorus, flanger and barber pole only::).
+
+The model is in class methods, so a check or a page of notes can ask it the same numbers:
+
+code::
+m = SwirlView.modelOf(Swirl.presetSettings('juno I'));
+m[\caption];						// what the caption says
+m[\scale];							// 10: the vertical scale in cents
+m[\paths][0][0].size;				// 64 points of the left side's first line
+SwirlView.markText(SwirlView.combMark(Swirl.presetSettings('filter matrix'),
+	Swirl.tapsAt(Swirl.presetSettings('filter matrix'))[0]));	// "peak 500 Hz · B4 +21 ct"
+::
+
+CLASSMETHODS::
+
+METHOD:: new
+ARGUMENT:: unit
+The link::Classes/Swirl::.
+ARGUMENT:: parent
+A view to go in.
+
+METHOD:: cps
+Tidal's cycles a second as the model assumes them for a synced lfo (0.5625: 135 bpm at four beats a cycle). Set it to draw at another tempo.
+
+METHOD:: curvePoints
+How many points the comb's curve has when no column count is given (160).
+
+METHOD:: modelOf
+Everything the display draws from the settings alone.
+ARGUMENT:: settings
+An link::Classes/Event::; what it does not say is the table's default.
+ARGUMENT:: cps
+Tidal's cycles a second, nil for link::#*cps::.
+ARGUMENT:: envFreqs
+The frequencies of the comb's band, nil for link::#*curveFreqs::.
+RETURNS:: An link::Classes/Event::: code::paths:: (per side, per line, an link::Classes/Array:: of code::[delay, cents, gain]:: over one period: 64 points, more with a fast lfo, up to 384), code::still:: (link::Classes/Swirl#*tapsAt:: at phase 0.25), code::scale::, code::range::, code::d0::, code::env:: (per frequency code::[lowest, highest]:: dB over 16 phases), code::freqs::, code::caption::, code::cents::, code::rate::, code::mode::, code::noise::, code::settings::.
+
+METHOD:: curveFreqs
+link::#*curvePoints:: frequencies from 20 Hz to 20 kHz, on a log scale.
+
+METHOD:: columnFreqs
+code::k:: frequencies in each of code::cols:: columns, 20 Hz to 20 kHz on a log scale.
+ARGUMENT:: cols
+ARGUMENT:: k
+
+METHOD:: columns
+Per column, code::[lowest, highest]:: of a list of dB values, code::k:: values a column.
+ARGUMENT:: dbs
+ARGUMENT:: k
+
+METHOD:: combMark
+The first notch, or the first peak with feedback in the flanger, of a response, refined between its points.
+ARGUMENT:: settings
+ARGUMENT:: taps
+One side of link::Classes/Swirl#*tapsAt::.
+ARGUMENT:: freqs
+ARGUMENT:: dbs
+The response at code::freqs:: in dB, worked out when nil.
+RETURNS:: code::[\notch or \peak, Hz]::, or nil when the response is flat.
+
+METHOD:: markText
+What the comb's title says about a mark.
+ARGUMENT:: mark
+What link::#*combMark:: answers.
+
+METHOD:: wantsSpectrum
+true: the panel sends it the output's spectrum.
+
+METHOD:: minHeight
+The smallest height it is given, in pixels (250).
+
+METHOD:: delayLo
+The voices' shortest delay on the axis (0.00005 s).
+
+METHOD:: delayHi
+The voices' longest delay on the axis (0.045 s).
+
+METHOD:: dbLo
+The comb's lowest level (-24 dB).
+
+METHOD:: dbHi
+The comb's highest level (+18 dB).
+
+INSTANCEMETHODS::
+
+METHOD:: hint
+What the window's hint bar says for a point in the display: the part under it, what dragging does, and the values it would change.
+ARGUMENT:: x
+ARGUMENT:: y
+RETURNS:: A link::Classes/String::, empty outside the parts.

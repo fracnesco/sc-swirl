@@ -1,0 +1,277 @@
+TITLE:: Swirl
+summary:: chorus, ensemble, dimension, flanger, thru-zero, barber pole and vibrato in one engine of moving delay lines, as a UGen and as an object, with a window
+categories:: Libraries>Swirl
+related:: Classes/FxParamUnit, Classes/SwirlView, Classes/FxDevicePanel, Classes/FxUnit, Classes/FxChain, Classes/FxLfo
+
+DESCRIPTION::
+Seven kinds of moving delay in one engine - up to four interpolated delay lines a side, one lfo, a formula per mode for each line's delay and gain, feedback in the line - each mode set up the way one piece of hardware set it up: the Juno's chorus, the string machines' ensemble, Roland's Dimension D, the classic flangers, tape flanging through zero, a barber pole that climbs for ever, and a vibrato.
+
+code::
+Ndef(\pad, { Swirl.ar(Saw.ar([110, 110.3, 165]).sum * 0.08 ! 2, \swirl) }).play;
+
+p = Swirl(Ndef(\pad), \swirl);
+p.gui;
+p.preset = 'juno II';
+p.style = \flanger; p.baseTime = 0.0015; p.sweep = 0.008; p.feedback = 0.7;
+p.preset = 'barber pole';
+::
+
+A chorus is a copy of the sound a few milliseconds late, whose delay keeps moving. A delay that grows reads the sound more slowly than it was written, so the copy sings flat; one that shrinks reads it faster, so it sings sharp: a line's pitch is 1 minus how fast its delay moves. A triangle lfo of depth code::a:: seconds either side at code::f:: Hz gives two steady detunes of code::4 a f:: (the Juno's 2.1 ms at 0.5 Hz: 0.42 %, 7.3 cents), a sine a wobble of code::2 pi a f::. Mixed with the dry, the copy also makes a comb: the first notch at code::1 / (2 d)::, the rest at its odd multiples.
+
+The seven modes, the items of code::style:: (append-only: node maps carry the index):
+
+table::
+## strong::style:: || strong::lines a side:: || strong::what it is::
+## code::\chorus:: || 1 || one line on one triangle, the right side's upside down (code::lfoPhase:: 0.5): Roland Juno-60/106; feedback allowed
+## code::\ensemble:: || 3, 120 degrees apart || a slow lfo and an optional fast one (code::fastDepth::): Solina, RS-202/505, the Tri-Stereo Chorus; with a sine the mean pitch stands still
+## code::\dimension:: || 1 || long delays, small slow sweeps, the bass kept dry by code::lowCut:: and the sides cross-fed by code::cross::: Roland SDD-320
+## code::\flanger:: || 1 || an exponential sweep (the notches move evenly in pitch), feedback both ways; code::sweep:: 0 is a still comb (the Electric Mistress's filter matrix)
+## code::\thruzero:: || 1 || the dry delayed by code::baseTime:: clipped to 0.5-5 ms, the wet crossing it; with code::invert:: the sound nulls at the crossing. strong::The whole effect is that late::
+## code::\barberpole:: || 4 on one saw || each line fades in, sweeps an octave and fades out: notches that climb for ever (fall, with code::falling::)
+## code::\vibrato:: || 1 || only the moving copy, its swing in cents (code::cents::), whatever the rate - down to the slow rates where that swing would need more than 10 ms of delay either side (under about 0.23 Hz at 25 cents on a sine); the caption then says what it really is
+::
+
+code::analog:: is the bucket-brigade character (the Juno's filters, a compander, a soft ceiling), code::noise:: its hiss, which only plays while sound comes in. The compander is exact on a steady sound but dulls a hit after silence, as the chips' did: a kick through vibrato (the wet alone) loses 4.2 dB of its peak at analog 0.7 - every juno preset's - and 6.9 dB at 1, more in its first 5 ms. In the other modes the dry carries the attack. code::lowCut::, code::hiCut::, code::analog:: and code::noise:: at their floors (20 Hz, 20 kHz, 0, 0) are out of the path bit for bit.
+
+Every preset is level-matched to the dry on broadband sound, with a trim per mode and per code::invert:: (link::#*trimOf::): on pink noise within 1 dB, except dimension 1-3 (1.3 dB under) and tape flange (3.3 dB under), whose trims stop where the comb's peaks would rise more than 3 dB over the input (link::#*maxPeakGain::). On a tone or a chord no trim holds - a comb lifts some frequencies and cuts others: presets measured -8.3 to +0.3 dB against the dry on a saw pad, -10.8 to +4.4 dB on a 1 kHz sine. The continuous settings glide where a jump would be heard (link::#*glideSpeed:: and the methods after it). A change of code::style::, code::lfoShape::, code::lfoSync::, code::invert:: or code::falling:: dips to the dry for 24 ms and happens at the bottom of the dip, so the delay never jumps - which is what lets a Tidal pattern change them event by event.
+
+Measured offline, an NRT render per case: every line's delay equals link::#*tapsAt:: to 7.5e-9 s; 'juno I' sings +7.23 and -7.28 cents on a 1 kHz sine; a still 1 ms flanger has notches at 500, 1500, 2500 Hz, 64-72 dB deep; thru-zero with code::invert:: nulls to 0; every preset not held by the peak cap is within 0.73 dB of the dry on pink noise; a jump of any setting on a 0.5 sine steps no more than the sine itself does.
+
+subsection:: The object and the UGen
+It is an link::Classes/FxParamUnit::, so everything that class documents works here: code::Swirl.ar(in, name)::, code::Swirl(node, name)::, code::Swirl.onBus(bus, numChannels)::, presets, the clipboard, code::gui::. With SuperDirtGUI installed it is an insert, code::~sdg.addInsert(0, \swirl)::, listed under modulation.
+
+Channels go in pairs, each a left and a right side with code::cross:: and code::width:: between them; an odd last channel gets the left side's lines alone. A mono sound on one channel stays mono: give it as two (code::sig ! 2::) to hear the width. A stereo pair is 758 UGens (one channel 463, four 1246) and about 2.5-3 % of the server at 48 kHz on the Mac it was measured on (eight stereo instances, code::s.avgCPU::).
+
+strong::Four channels and more need more wire buffers than a stock server's 64:: - four up to 96, six up to 128 - or the SynthDef fails to load with "exceeded number of interconnect buffers":
+
+code::
+s.options.numWireBufs = 128;	// before booting
+::
+
+subsection:: Tidal's clock
+code::lfoSync:: other than code::\free:: makes the lfo one period every so many of Tidal's cycles, locked to the cycle (link::Classes/FxLfo::'s menu: four, two, one, half, quarter, eighth, sixteenth, third, sixth, twelfth). The graph reads FxKit's shared clock controls, code::fxCps::, code::fxCycle:: and the trigger code::fxSync::, which SuperDirtGUI sets (link::#*usesTidalClock::); told nothing, it runs at 0.5625 cycles a second. A message that lands a little off glides the phase back over 150 ms (link::#*clockGlide::) instead of stepping.
+
+From Tidal, every parameter but code::output:: plays event by event (link::#*tidalParams::), and code::n:: picks a preset by its index in code::Swirl.presetNames::, so the preset list is append-only: code::# n 9:: is 'jet flanger'.
+
+subsection:: The window
+code::p.gui:: opens it, code::p.panel(view):: puts it in a view of yours (an link::Classes/FxDevicePanel::). The display (link::Classes/SwirlView::) is the voices - every line's delay along and the pitch it sings at up, over one lfo period, with dots where the lines are now - and the comb they make, with its first notch named as a note. Two pages of cards: swirl (voices: style, delay, depth, feedback, invert, falling; lfo: rate, sync, shape, phase) and colour (strings: the fast lfo; colour: low cut, hi cut, analog, hiss; stereo: cross); output (width, mix, output) closes both. In vibrato the depth knob is code::cents:: instead of code::sweep::. A knob the mode ignores is dimmed (link::#*isActive::).
+
+subsection:: Parameters
+Each is a property of the object: read it, set it. The numbers are in the order of the node's control, which is what saved node maps carry.
+
+table::
+## strong::parameter:: || strong::range:: || strong::default:: || strong::what it does::
+## code::style:: || chorus ensemble dimension flanger thruzero barberpole vibrato || chorus || which kind of swirl: chorus, ensemble, dimension, flanger, thru-zero, barber pole, vibrato
+## code::lfoRate:: || 0.01 .. 20 Hz || 0.5 || how fast the lines move, when free
+## code::lfoSync:: || free four two one half quarter eighth sixteenth third sixth twelfth || free || free at its rate, or one period every so many cycles of Tidal's clock
+## code::lfoShape:: || triangle sine trapezoid noise || triangle || triangle = two steady detunes (Juno), sine = a wobble, trapezoid = steadier still, noise = hands on tape reels
+## code::lfoPhase:: || 0 .. 1 || 0.5 || how far apart the sides move: 50 is opposite (Juno, Dimension), 0 together (more comb, no width)
+## code::baseTime:: || 0.0002 .. 0.03 s || 0.0028 || the lines' middle delay: short = flanger, 2-5 ms = Juno, 7-10 ms = Dimension; in thru-zero the latency (0.5-5 ms)
+## code::sweep:: || 0 .. 0.01 s || 0.0021 || how far each line moves either side of the delay; the caption shows the cents it gives
+## code::cents:: || 0 .. 100 ct || 25 || vibrato: the pitch swing in cents, whatever the rate (at slow rates, as much as 10 ms of delay allows)
+## code::feedback:: || -0.95 .. 0.95 || 0 || flanger, chorus, barber pole: the wet back into its line - up = ringing peaks, down = hollow (unlike the family's other feedback knobs, this one goes both ways)
+## code::invert:: || on off || false || the wet upside down: the notches move (flanger), the null at the crossing (thru-zero)
+## code::falling:: || on off || false || barber pole: notches that fall for ever instead of rising
+## code::fastDepth:: || 0 .. 0.0005 s || 0 || a second, fast lfo on every line: the string machine's shimmer (chorus, ensemble, dimension)
+## code::fastRate:: || 2 .. 10 Hz || 6 || the fast lfo's speed: 5-6.5 Hz in the string machines
+## code::lowCut:: || 20 .. 2000 Hz || 20 || a high pass before the lines: the bass stays dry and centred (Dimension's 80 Hz)
+## code::hiCut:: || 1000 .. 20000 Hz || 20000 || a low pass on the wet: darker voices
+## code::analog:: || 0 .. 1 || 0 || bucket-brigade character: the Juno's filters, a compander that breathes, soft saturation
+## code::noise:: || 0 .. 1 || 0 || the hiss of the chips, only while sound comes in (100 % = about -50 dBFS)
+## code::cross:: || 0 .. 1 || 0 || each side gets the other's wet upside down: wider; at 100 the effect vanishes in mono (mono-safe)
+## code::width:: || 0 .. 2 || 1 || mid/side width of the result: 0 mono, 100 as it is, 200 sides doubled
+## code::mix:: || 0 .. 1 || 1 || how much of the effect goes out, against the dry signal
+## code::output:: || -36 .. 24 dB || 0 || the level of the whole thing, in dB
+::
+
+subsection:: Presets
+By index: 0 default, 1 juno I, 2 juno II, 3 juno I+II, 4 dimension 1, 5 dimension 2, 6 dimension 3, 7 string machine, 8 tri chorus, 9 jet flanger, 10 filter matrix, 11 tape flange, 12 barber pole, 13 vibrato, 14 doubler. Yours go in code::Platform.userAppSupportDir +/+ "swirl-presets.scd"::.
+
+subsection:: The model
+The class answers, in numbers, what the graph does with a setting: the same formulas, so the display draws from them and the checks compare the server against them. A setting is an link::Classes/Event::; what it does not say is the table's default.
+
+code::
+Swirl.caption(Swirl.presetSettings('juno I'));		// "chorus · 2.8 ± 2.1 ms · ±7.3 ct · 0.50 Hz"
+Swirl.centsOf(Swirl.presetSettings('juno II'));		// 12.0
+Swirl.rangeOf(Swirl.presetSettings('jet flanger'));	// [0.00024, 0.0095]: 40 to 1
+Swirl.tapsAt(Swirl.presetSettings('juno I'), 0.25)[0][0];	// the left line a quarter of the way round
+Swirl.noteOf(500);								// ["B4", 21]
+Swirl.latency(Swirl.presetSettings('tape flange'));	// 0.004
+::
+
+CLASSMETHODS::
+
+METHOD:: identityColour
+The modulation family's orchid-rose (code::FxPalette.identity(\modulation)::, or the same colour on an older sc EQ): the name, the hero knobs' arcs, the voices card, the lines and the comb in the display.
+
+METHOD:: modes
+The items of code::style::, in node-map order.
+RETURNS:: An link::Classes/Array:: of link::Classes/Symbol::s.
+
+METHOD:: shapes
+The items of code::lfoShape::.
+
+METHOD:: modeIndex
+A style's index in link::#*modes::, 0 for one it does not know.
+ARGUMENT:: style
+A link::Classes/Symbol::.
+
+METHOD:: modeDry
+Per mode, the box's own dry level, before the trim.
+
+METHOD:: modeWet
+Per mode, the box's own wet level, before the trim.
+
+METHOD:: modeFb
+Per mode, the largest feedback it takes (0 where feedback is dimmed; 0.7 in the barber pole).
+
+METHOD:: modeTrim
+Per mode, the level trim the box gets with code::invert:: off: link::#*modeTrimPink::, held under link::#*maxPeakGain:: over link::#*peakOf::.
+
+METHOD:: modeTrimInv
+The same with code::invert:: on.
+
+METHOD:: modeTrimPink
+Per mode, the trim that matches the box to the dry on pink noise with code::invert:: off, measured.
+
+METHOD:: modeTrimInvPink
+The same with code::invert:: on: inverting the wet moves the level by up to 6 dB where the delay is short (thru-zero cancels the bass).
+
+METHOD:: maxPeakGain
+The most a trim may lift the comb's peaks over the input: 1.4125 (+3 dB). The trims of dimension (with or without code::invert::), and of chorus, ensemble, thru-zero and barber pole with code::invert::, stop there.
+
+METHOD:: peakOf
+The box's gain where its lines add up in phase with the dry, before the trim and without feedback: dry + wet (+ sqrt 3 x wet for the ensemble's three lines).
+ARGUMENT:: m
+A mode's index.
+
+METHOD:: trimOf
+The trim a setting gets, by its mode and code::invert::.
+ARGUMENT:: settings
+An link::Classes/Event::.
+
+METHOD:: extrasSize
+The length of an object's code::extras:: while its meter is on (28): the lfo's phase, the fast lfo's phase, the wet level of each side, then the first pair's eight lines - left 0-3, right 0-3 - as delays in seconds, pitch offsets (ratio - 1) and gains. Listening only: the sound is the same without them.
+
+METHOD:: rateOf
+The lfo's rate in Hz: its own, or Tidal's cycles a second over the sync's cycles.
+ARGUMENT:: settings
+An link::Classes/Event::.
+ARGUMENT:: cps
+Tidal's cycles a second (0.5625).
+
+METHOD:: d0Of
+Thru-zero's dry delay for a code::baseTime:: in seconds: clipped to 0.0005-0.005.
+ARGUMENT:: base
+
+METHOD:: latency
+How late the effect makes the sound, in seconds: the clipped dry delay in thru-zero, else 0.
+ARGUMENT:: settings
+An link::Classes/Event::.
+
+METHOD:: slopeOf
+A shape's slope factor: at depth code::a:: and rate code::f:: the delay moves at most code::k a f:: seconds a second (triangle 4, sine 2 pi, trapezoid 6, noise as a sine).
+ARGUMENT:: shape
+
+METHOD:: shapeAt
+A shape's value, -1 to 1, at a phase (the noise shape answers 0, the middle it wanders round).
+ARGUMENT:: shape
+ARGUMENT:: ph
+0 to 1.
+
+METHOD:: tapsAt
+Every line's delay, gain and pitch at one phase of the lfo.
+ARGUMENT:: settings
+An link::Classes/Event::.
+ARGUMENT:: ph
+The lfo's phase, 0 to 1.
+ARGUMENT:: phF
+The fast lfo's phase.
+ARGUMENT:: sr
+The sample rate (48000): the shortest delays keep a margin of 4 samples.
+ARGUMENT:: cps
+Tidal's cycles a second, for a synced lfo.
+RETURNS:: Per side (left, right), per line (0-3), an link::Classes/Event:: with code::delay:: (seconds), code::gain:: and code::cents::. Lines a mode does not use have gain 0.
+
+METHOD:: rangeOf
+The shortest and longest delay any line reaches, in seconds.
+ARGUMENT:: settings
+ARGUMENT:: sr
+
+METHOD:: centsParts
+The largest pitch swing in cents, as code::[the lfo's, the fast lfo's]::; for the noise shape the first is nominal (as a sine at the rate).
+ARGUMENT:: settings
+ARGUMENT:: cps
+
+METHOD:: centsOf
+The largest pitch swing in cents, both lfos together (vibrato: about its code::cents::).
+ARGUMENT:: settings
+ARGUMENT:: cps
+
+METHOD:: response
+The box's magnitude response for one side, at its lines' delays, the colour stages and code::cross:: left out, with the same feedback compensation as the sound.
+ARGUMENT:: settings
+ARGUMENT:: taps
+One side of link::#*tapsAt::.
+ARGUMENT:: freqs
+The frequencies, in Hz.
+RETURNS:: A ratio per frequency.
+
+METHOD:: combPoints
+The first notch and the first peak of that response between 20 Hz and 20 kHz.
+ARGUMENT:: settings
+ARGUMENT:: taps
+RETURNS:: An link::Classes/Event:: code::(notch:, peak:):: in Hz, nil where there is none.
+
+METHOD:: firstNotch
+The first notch, in Hz, of the left side at phase 0.25 unless code::taps:: are given.
+ARGUMENT:: settings
+ARGUMENT:: taps
+
+METHOD:: noteOf
+A frequency as the nearest note and how far from it.
+ARGUMENT:: freq
+RETURNS:: code::[name, cents]::, e.g. code::["B4", 21]:: for 500 Hz.
+
+METHOD:: caption
+What the display's caption says: the mode and its numbers.
+ARGUMENT:: settings
+ARGUMENT:: cps
+RETURNS:: A link::Classes/String::.
+
+METHOD:: clockGlide
+The time constant a synced lfo's step at a clock message is faded out with, in seconds (0.15).
+
+METHOD:: glideSpeed
+How fast code::baseTime:: and code::sweep:: may move when they are changed, in seconds a second (0.025): a delay moving that fast sings 2.5 % (44 cents) off, so a jump glides instead of swooping - 1 to 10 ms takes 0.36 s.
+
+METHOD:: cutGlide
+The 60 dB time of code::lowCut:: and code::hiCut::'s glide, in octaves (0.15 s, two Lags).
+
+METHOD:: analogGlide
+The time of code::analog::'s glide (0.4 s, two Lags), slow enough for the expander to keep up with the compressor.
+
+METHOD:: fbGlide
+The time of the feedback's glide (0.15 s, two Lags). A step in the feedback is a step in what the line holds, heard one delay later as a click.
+
+METHOD:: phaseGlide
+The time of code::lfoPhase::'s glide (0.3 s, two Lags): a jump of it is a jump of every right-side line's delay.
+
+METHOD:: envTime
+The compander's rms detector's time constant, in seconds (0.03).
+
+METHOD:: hissLevel
+The hiss at code::noise:: 1, before the trims (about -50 dBFS rms at the output).
+
+INSTANCEMETHODS::
+
+EXAMPLES::
+
+code::
+s.boot;
+Ndef(\pad, { Swirl.ar(Saw.ar([110, 110.3, 165]).sum * 0.08 ! 2, \swirl) }).play;
+p = Swirl(Ndef(\pad), \swirl);
+p.gui;
+p.preset = Swirl.presetNames.choose;
+p.free; Ndef(\pad).clear;
+::
