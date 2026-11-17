@@ -158,6 +158,10 @@ Swirl : FxParamUnit {
 		]
 	}
 
+	// a card in a strip (FxDeviceCard): the style first - it decides what the
+	// others mean - then the rate or its sync, the depth the style uses, feedback
+	*cardKeys { ^[\style, [\lfoRate, \lfoSync], [\sweep, \cents], \feedback] }
+
 	*isActive { |key, unit|
 		var m = unit.get(\style);
 		^switch (key,
@@ -168,6 +172,8 @@ Swirl : FxParamUnit {
 			\lfoShape, { m != \barberpole },			// the barber pole is a saw
 			\lfoPhase, { (unit.get(\lfoShape) != \noise) or: { m == \barberpole } },	// noise has no phase
 			\lfoRate, { unit.get(\lfoSync) == \free },
+			\sweep, { m != \vibrato },				// vibrato's depth is in cents
+			\cents, { m == \vibrato },
 			\fastDepth, { [\chorus, \ensemble, \dimension].includes(m) },
 			\fastRate, { [\chorus, \ensemble, \dimension].includes(m) and: { (unit.get(\fastDepth) ? 0) > 0 } },
 			\cross, { m != \vibrato },
